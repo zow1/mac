@@ -1,0 +1,20 @@
+# 换行符策略：这几类脚本在 macOS 上必须是 LF，
+# 否则 Git 的 autocrlf 会把它们转成 CRLF，bash 会报 bad interpreter: /bin/bash^M
+* text=auto
+
+*.sh      text eol=lf
+*.command text eol=lf
+*.py      text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.md      text eol=lf
+*.json    text eol=lf
+
+# Windows 批处理反过来，要 CRLF
+*.bat     text eol=crlf
+
+# 二进制，别碰
+*.png  binary
+*.ico  binary
+*.icns binary
+*.exe  binary
