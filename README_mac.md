@@ -38,7 +38,7 @@ mac_hotkey.py          # Carbon 全局热键
 start_mac.command      # 双击启动
 ```
 
-可选：`check_mac.command`（自检）、`build_mac.sh`（打包成 `.app` / `.dmg`）、`icon_preview.png`（做图标用）。
+可选：`check_mac.command`（自检）、`build_mac.sh`（打包成 `.app` / `.dmg`）、`icon_mac.png`（1024×1024 图标）。
 
 ### 3. 给脚本执行权限
 
@@ -166,7 +166,61 @@ dist/FloatTrans-1.0.0.dmg      ← 分发用
 
 ---
 
-## 六、已知限制
+## 六、在 GitHub 上打包（不碰自己的 Mac 也行）
+
+仓库里已经带好了工作流 `.github/workflows/build-mac.yml`，推上去就能在 GitHub 的 macOS 机器上打出 `.app` + `.dmg`，本机连 Python 都不用装。
+
+### 关键：必须用 Intel 的 runner
+
+| runner 标签 | 架构 | 能不能给你的 MacBook Air 2015 用 |
+| --- | --- | --- |
+| `macos-15-intel` | **Intel x86_64** | ✅ 就是它 |
+| `macos-latest` / `macos-14` / `macos-15` | arm64 (M 芯片) | ❌ 打出来的包在 Intel 上跑不了 |
+| `macos-13` | — | ❌ 已下线 |
+
+PyInstaller 不能跨架构编译，所以工作流里写死了 `runs-on: macos-15-intel`。工作流最后会用 `file` 打印主程序的架构，确认是 `x86_64`。
+
+### 步骤
+
+1. 在 GitHub 建一个空仓库（Public / Private 都行，Private 也能免费用 macOS runner，只是计入额度）
+2. 本地已经初始化好 git 仓库并提交过了，把远程地址加上再推：
+
+```bash
+git remote add origin https://github.com/<你的用户名>/<仓库名>.git
+git push -u origin main
+```
+
+3. 打开仓库页面 → **Actions** → 左侧 **Build macOS app** → 右上 **Run workflow** → 运行
+4. 等 3～5 分钟，进这次运行，页面底部 **Artifacts** 下载：
+   - `FloatTrans-macOS-x86_64-dmg` —— 里面是 `FloatTrans-1.0.0.dmg`
+   - `FloatTrans-macOS-x86_64-app` —— 里面是 zip 包的 `.app`
+
+> 推送前如果想把提交作者改成你自己：
+> `git config user.name "你的名字" && git config user.email "你的邮箱" && git commit --amend --reset-author --no-edit`
+
+### 为什么仓库里要放 `.gitattributes`
+
+`*.sh` / `*.command` 强制 `eol=lf`。Windows 上 `core.autocrlf=true` 时 Git 会把它们转成 CRLF，到 macOS 上 bash 直接报：
+
+```
+bad interpreter: /bin/bash^M: no such file or directory
+```
+
+这个坑很隐蔽，`.gitattributes` 已经挡掉了。
+
+### 下载后注意
+
+- 产物是 **ad-hoc 签名**（没有开发者证书），首次打开仍要右键 → 打开；提示「已损坏」就 `xattr -dr com.apple.quarantine /Applications/FloatTrans.app`
+- 打包后的权限是按 app 单独记的，要在「屏幕录制」里勾 **FloatTrans**
+- Artifact 默认保留 30 天，想要长期下载就建个 Release 把 dmg 传上去
+
+### 想同时出 Apple Silicon 版本
+
+把工作流里注释掉的那个 `build-macos-arm` job 打开即可（`runs-on: macos-latest`）。两个包不能混用，按机器选。
+
+---
+
+## 七、已知限制
 
 - **只支持主屏**的截图取词（多显示器时框选范围是主屏）。
 - **没有圆角**：macOS 没有像 Windows `SetWindowRgn` 那样的公开接口，硬做要用私有 API，不值得。
@@ -175,7 +229,7 @@ dist/FloatTrans-1.0.0.dmg      ← 分发用
 
 ---
 
-## 七、这个版本没法在 Windows 上验证的部分
+## 八、这个版本没法在 Windows 上验证的部分
 
 代码是在 Windows 上写的，界面布局、翻译流程、降级逻辑都实跑过（在 Windows 上能启动 macOS 版界面，只是取词/热键降级），但下面这些**必须在你的 Mac 上才能确认**：
 

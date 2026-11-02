@@ -15,9 +15,12 @@ echo "[1/4] 安装依赖…"
 "$PY" -m pip install --quiet pyobjc-framework-Vision pyobjc-framework-Quartz
 
 echo "[2/4] 生成 .icns 图标…"
+# 有 Pillow 就重新画一张 1024 的，没有就用仓库里现成的 icon_mac.png
+if "$PY" -c "import PIL" >/dev/null 2>&1; then
+    "$PY" make_icon_mac.py >/dev/null 2>&1 || true
+fi
 rm -rf build_icon.iconset app.icns
 mkdir -p build_icon.iconset
-# 优先用 1024×1024 的 icon_mac.png，没有才退回 icon_preview.png
 SRC_ICON="icon_preview.png"
 [ -f icon_mac.png ] && SRC_ICON="icon_mac.png"
 echo "      素材：$SRC_ICON"
