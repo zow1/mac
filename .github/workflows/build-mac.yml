@@ -1,0 +1,84 @@
+name: Build macOS app
+
+# 手动触发，或打 v 开头的 tag 时自动构建
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build-macos:
+    # 你的 MacBook Air 2015 是 Intel，必须用 Intel runner 打，产物才是 x86_64
+    # （macos-13 已下线，现在的 Intel 标签是 macos-15-intel）
+    name: macOS Intel (x86_64)
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python 3.12
+        # setup-python 用的是 python.org 的安装包，自带 tkinter（Tk 8.6）
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 环境检查
+        run: |
+          sw_vers
+          uname -m
+          python3 --version
+          python3 -c "import tkinter, sys; print('Tk', tkinter.TkVersion, '| python', sys.version.split()[0])"
+          python3 -c "import sys; print('可执行文件:', sys.executable)"
+
+      - name: 打包 .app 和 .dmg
+        run: |
+          chmod +x build_mac.sh
+          ./build_mac.sh
+
+      - name: 检查产物架构
+        run: |
+          ls -lh dist/
+          echo "--- 主程序架构（应是 x86_64）---"
+          file dist/FloatTrans.app/Contents/MacOS/FloatTrans
+
+      - name: 压成 zip（保住可执行权限和软链接）
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            dist/FloatTrans.app dist/FloatTrans-app-x86_64.zip
+
+      - name: 上传 dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: FloatTrans-macOS-x86_64-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 上传 app（zip）
+        uses: actions/upload-artifact@v4
+        with:
+          name: FloatTrans-macOS-x86_64-app
+          path: dist/FloatTrans-app-x86_64.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  # 想在 M 系列芯片的 Mac 上用，把下面这段的注释去掉（或把上面 job 的
+  # runs-on 改成 macos-latest）。注意：arm64 的包在 Intel 机器上跑不了。
+  #
+  # build-macos-arm:
+  #   name: macOS Apple Silicon (arm64)
+  #   runs-on: macos-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.12"
+  #     - run: |
+  #         chmod +x build_mac.sh
+  #         ./build_mac.sh
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         name: FloatTrans-macOS-arm64-dmg
+  #         path: dist/*.dmg

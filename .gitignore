@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 打包产物
+build/
+dist/
+*.spec
+app.icns
+build_icon.iconset/
+build_dmg/
+
+# 系统垃圾
+.DS_Store
+Thumbs.db
+
+# 编辑器
+.vscode/
+.idea/
+
+# 本机配置 / 日志（不要提交）
+*.log
