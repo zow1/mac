@@ -114,6 +114,8 @@ python3 float_trans_mac.py --check
 | 窗口一片空白 / 字体发虚 | 用了系统自带 python3 的 Tk 8.5 → 换 python.org 的 Python 3.12 |
 | 翻译报 `SSL: CERTIFICATE_VERIFY_FAILED` | 找不到根证书。v1.1.0 起会自动找 certifi / `/etc/ssl/cert.pem`，都找不到就降级为不校验（日志里会记一行）。源码运行可手动补：`python3 -m pip install --user certifi` |
 | 点「截图」没反应或识别为空 | 屏幕录制权限没给，或给了但没重启终端 |
+| **勾了屏幕录制还是一直弹授权框** | 两个原因：① 勾完没 ⌘Q 退出重开；② 重新打包后签名变了，列表里那条勾选属于旧版本。解决：在「屏幕录制」列表里选中 FloatTrans 按 **−** 删掉 → 重新点一次截图 → 弹窗里允许 → **⌘Q 完全退出再打开**。命令行等价：`tccutil reset ScreenCapture com.zow1.floattrans` |
+| 每次重新打包都要重新授权 | 正常。ad-hoc 签名每次构建都变，系统会当成新 App。要么每次删条目重授权，要么自己买开发者证书签名 |
 | 截图时整屏全黑 | v1.1.0 已修：改为**先截屏再建窗口**（原来截到的是自己的黑窗口），并且不再依赖 macOS 不支持的 stipple 压暗 |
 | 热键按了没反应 | v1.1.0 已修：Carbon 注册成功但 Tk 事件循环不派发，改成轮询按键状态（`CGEventSourceKeyState`，同样不需要辅助功能授权）。设置里能看到实际生效的组合 |
 | 呼出热键「未注册」 | ⌃⌥T 被别的 App 占了，程序会自动试备用键；设置里能看到实际注册成什么 |

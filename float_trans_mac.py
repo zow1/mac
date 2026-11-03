@@ -51,7 +51,7 @@ except Exception:
 
 APP_NAME = "FloatTrans"
 APP_TITLE = "悬浮翻译"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 CFG_DIR = os.path.join(os.path.expanduser("~"),
                        "Library", "Application Support", APP_NAME)
@@ -160,6 +160,22 @@ def mac_activate():
         NSApp.activateIgnoringOtherApps_(True)
     except Exception:
         pass
+
+
+def is_translocated() -> bool:
+    """是否在 Gatekeeper 的临时路径里运行。
+
+    从 dmg / 下载目录直接双击、又没拖进「应用程序」时，macOS 会把 App 复制到
+    /private/var/folders/.../AppTranslocation/ 下运行。那个路径每次都不一样，
+    屏幕录制权限存不住——勾了也白勾。
+    """
+    try:
+        for p in (os.path.abspath(__file__), os.path.abspath(sys.executable)):
+            if "AppTranslocation" in p:
+                return True
+    except Exception:
+        pass
+    return False
 
 
 def mac_float_everywhere(root):
@@ -658,6 +674,8 @@ class FloatTrans:
 
         # 取词相关
         self._selector = None
+        self._perm_hint = False
+        self._perm_asked = False
         self._hover_anchor = None
         self._hover_busy = False
         self._hover_pos = None
@@ -1550,13 +1568,16 @@ class FloatTrans:
         if why:
             self._set_status("OCR 不可用：" + why[:60])
             return
-        if not so.screen_record_ok():
-            so.request_screen_record()
-            self._set_status("请在 系统设置 → 隐私与安全性 → 屏幕录制 里勾选本程序")
-            return
         if self._selector is not None:
             return
         self.hide_hover()
+        # 这里不再拿 CGPreflightScreenCaptureAccess 当门槛。
+        # 它在两种很常见的情况下会假阴性：
+        #   a) 刚在系统设置里勾上、App 还没重启；
+        #   b) 重新打包后签名（cdhash）变了，系统里那条勾选属于旧版本。
+        # 以前一旦假阴性就直接 return 并弹一次授权框，结果就是「明明勾了还是一直弹」。
+        # 现在改成：照常开框选，真截失败了再引导去授权。
+        self._perm_hint = not so.screen_record_ok()
         try:
             self._selector = RegionSelector(
                 self.root, self._on_region, self._on_region_cancel)
@@ -1565,7 +1586,27 @@ class FloatTrans:
             self._selector = None
             self._set_status("框选窗口打开失败")
             return
-        self._set_status("拖动框选要翻译的区域…")
+        if self._perm_hint:
+            self._set_status("拖动框选（权限可能未生效）")
+        else:
+            self._set_status("拖动框选要翻译的区域…")
+
+    def _perm_help(self, extra: str = ""):
+        """权限没生效时的引导。每次运行只请求一次，避免反复弹系统授权框。"""
+        if not self._perm_asked:
+            self._perm_asked = True
+            try:
+                so.request_screen_record()
+            except Exception:
+                pass
+        if is_translocated():
+            log("屏幕录制：检测到 App Translocation，App 需拖进 /Applications")
+            tip = "权限存不住：先把 App 拖进「应用程序」再打开"
+        else:
+            log("屏幕录制：勾选无效，可执行 tccutil reset ScreenCapture "
+                "com.zow1.floattrans 后重新授权")
+            tip = "屏幕录制没生效：删掉列表里的 FloatTrans 重新授权，再 ⌘Q 重开"
+        self._set_status(tip)
 
     def _on_region_cancel(self):
         self._selector = None
@@ -1590,11 +1631,17 @@ class FloatTrans:
         text, err, size = payload
         w, h = size
         if err:
-            self._set_status("识别失败：" + err[:50])
+            if self._perm_hint:
+                self._perm_help("识别失败")
+            else:
+                self._set_status("识别失败：" + err[:50])
             return
         if not text:
             if h < 18 or w < 18:
                 self._set_status("框太小了，把整行文字都框进去")
+            elif self._perm_hint:
+                # 截出来是空的：十有八九是权限没真正生效，截到的是黑图
+                self._perm_help("没认出文字")
             else:
                 self._set_status("没认出文字，框松一点再试")
             return
@@ -1765,7 +1812,20 @@ def run_check():
         print("取词模块    :", "可用" if not why else "不可用 -> " + why)
         if not why:
             ok = so.screen_record_ok()
-            print("屏幕录制权限:", "已授权" if ok else "未授权（截图取词会被拦）")
+            print("屏幕录制权限:", "已授权" if ok else "preflight 说没有（可能误报）")
+            # preflight 会假阴性，真截一张小图才算数
+            try:
+                _p, _iw, _ih = so.capture(0, 0, 32, 32)
+                print("实际截屏    : 成功")
+                try:
+                    os.remove(_p)
+                except Exception:
+                    pass
+            except Exception as e:
+                print("实际截屏    : 失败 ->", str(e)[:90])
+            if is_translocated():
+                print("运行位置    : 临时路径（App Translocation）")
+                print("              权限存不住，请把 FloatTrans.app 拖进 /Applications 再打开")
             try:
                 sw, sh = so.screen_size()
                 print("主屏尺寸    : %d x %d 点" % (sw, sh))

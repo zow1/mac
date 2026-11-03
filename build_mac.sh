@@ -7,7 +7,7 @@ set -e
 cd "$(dirname "$0")"
 
 PY=${PY:-python3}
-VERSION="1.1.0"
+VERSION="1.1.1"
 MODE=${1:-dmg}
 
 echo "[1/4] 安装依赖…"
@@ -47,6 +47,7 @@ iconutil -c icns build_icon.iconset -o app.icns
 echo "[3/4] 打包 .app…"
 "$PY" -m PyInstaller --noconfirm --clean --windowed --name FloatTrans \
     --icon app.icns \
+    --osx-bundle-identifier com.zow1.floattrans \
     --hidden-import Vision \
     --hidden-import Quartz \
     --hidden-import AppKit \
