@@ -194,9 +194,13 @@ git push -u origin main
 ```
 
 3. 打开仓库页面 → **Actions** → 左侧 **Build macOS app** → 右上 **Run workflow** → 运行
-4. 等 3～5 分钟，进这次运行，页面底部 **Artifacts** 下载：
-   - `FloatTrans-macOS-x86_64-dmg` —— 里面是 `FloatTrans-1.0.0.dmg`
-   - `FloatTrans-macOS-x86_64-app` —— 里面是 zip 包的 `.app`
+4. 等 3～5 分钟，进这次运行，页面底部 **Artifacts** 下载 `FloatTrans-macOS-x86_64`：
+   - 里面有 `FloatTrans-1.1.0.dmg`（双击挂载后拖进「应用程序」）
+   - 还有 `FloatTrans-app-x86_64.zip`（解压得到 `.app`，省一步挂载）
+
+> 如果某次卡在「上传产物」这一步报 `Failed to CreateArtifact ... Request timeout`，
+> 那是 GitHub 的 artifact 存储服务临时超时，**和代码无关**（打包其实已经成功）。
+> 直接在该次运行页右上角点 **Re-run failed jobs** 重跑即可。
 
 > 推送前如果想把提交作者改成你自己：
 > `git config user.name "你的名字" && git config user.email "你的邮箱" && git commit --amend --reset-author --no-edit`

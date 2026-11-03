@@ -42,29 +42,23 @@ jobs:
           ls -lh dist/
           echo "--- 主程序架构（应是 x86_64）---"
           file dist/FloatTrans.app/Contents/MacOS/FloatTrans
-          echo "--- 签名（应是 adhoc）---"
-          codesign -dv --verbose=2 dist/FloatTrans.app 2>&1 | head -8 || true
-          echo "--- 签名校验 ---"
-          codesign --verify --deep --strict --verbose=2 dist/FloatTrans.app 2>&1 || true
 
       - name: 压成 zip（保住可执行权限和软链接）
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
             dist/FloatTrans.app dist/FloatTrans-app-x86_64.zip
 
-      - name: 上传 dmg
+      - name: 上传产物（dmg + app）
+        # 合成一个 artifact：每次 upload-artifact 都要向 GitHub 的
+        # ArtifactService 发一次 CreateArtifact，少一次就少一个失败点。
+        # compression-level 0 是因为 dmg/zip 本身已压缩，再压一遍纯浪费 CPU。
         uses: actions/upload-artifact@v4
         with:
-          name: FloatTrans-macOS-x86_64-dmg
-          path: dist/*.dmg
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: 上传 app（zip）
-        uses: actions/upload-artifact@v4
-        with:
-          name: FloatTrans-macOS-x86_64-app
-          path: dist/FloatTrans-app-x86_64.zip
+          name: FloatTrans-macOS-x86_64
+          path: |
+            dist/*.dmg
+            dist/FloatTrans-app-x86_64.zip
+          compression-level: 0
           if-no-files-found: error
           retention-days: 30
 
