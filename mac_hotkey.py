@@ -16,12 +16,27 @@
 from __future__ import annotations
 
 import ctypes
+import threading
+import time
+
+try:
+    import Quartz as _Q
+except Exception:                      # 没装 pyobjc 时退化为纯 Carbon
+    _Q = None
 
 # 修饰键掩码（Carbon Events.h）
 MOD_CMD = 0x0100
 MOD_SHIFT = 0x0200
 MOD_ALT = 0x0800
 MOD_CTRL = 0x1000
+
+# Carbon 掩码 -> Quartz 的 CGEventFlags（两套数值不一样，别混用）
+_Q_MODS = {
+    MOD_CMD: 0x100000,      # kCGEventFlagMaskCommand
+    MOD_ALT: 0x80000,       # kCGEventFlagMaskAlternate
+    MOD_CTRL: 0x40000,      # kCGEventFlagMaskControl
+    MOD_SHIFT: 0x20000,     # kCGEventFlagMaskShift
+}
 
 # 虚拟键码（Carbon Events.h / HIToolbox）
 KEY_CODES = {
@@ -78,6 +93,15 @@ def parse_combo(combo: str):
     return mods, KEY_CODES[key]
 
 
+def _q_flags(mods: int) -> int:
+    """Carbon 修饰键掩码 -> Quartz CGEventFlags。"""
+    out = 0
+    for carbon, quartz in _Q_MODS.items():
+        if mods & carbon:
+            out |= quartz
+    return out
+
+
 def pretty_combo(combo: str) -> str:
     """'ctrl+alt+t' -> '⌃⌥T'，设置里显示用。"""
     parsed = parse_combo(combo)
@@ -110,9 +134,19 @@ class HotkeyListener:
         self._ids: dict[int, str] = {}
         self._next_id = 1
         self._target = None
+        # 轮询兜底：Tk 的事件循环不一定派发 Carbon 热键事件（实测 Monterey
+        # 上注册成功但按了没反应），所以再自己轮询一遍按键状态。
+        self._chosen: dict[str, str] = {}
+        self._poll_stop = False
+        self._last_fire: dict[str, float] = {}
+        self.polling = False
 
     # ---------------------------------------------------------------- 启动
     def start(self):
+        self._start_carbon()
+        self._start_polling()
+
+    def _start_carbon(self):
         try:
             self._carbon = ctypes.CDLL(
                 "/System/Library/Frameworks/Carbon.framework/Carbon")
@@ -155,10 +189,67 @@ class HotkeyListener:
             for combo in cands:
                 if self._register(action, combo):
                     self.labels[action] = pretty_combo(combo)
+                    self._chosen[action] = combo
                     break
         self.label = self.labels.get("show", "")
         if not self.labels:
             self.error = self.error or "热键都被占用了"
+
+    # ---------------------------------------------------------------- 轮询兜底
+    def _start_polling(self):
+        """Tk 的主循环不派发 Carbon 热键事件，这里直接轮询按键状态。
+
+        用 CGEventSourceFlagsState + CGEventSourceKeyState，都是查询当前
+        会话状态，不需要「辅助功能」授权。
+        """
+        if _Q is None:
+            return
+        targets = {}
+        for action, cands in self.combos.items():
+            if action not in self.events:
+                continue
+            combo = self._chosen.get(action)
+            if not combo:
+                combo = next((c for c in cands if parse_combo(c)), None)
+            parsed = parse_combo(combo) if combo else None
+            if parsed:
+                targets[action] = (combo, parsed)
+        if not targets:
+            return
+        self._poll_targets = targets
+        for action, (combo, _p) in targets.items():
+            if action not in self.labels:
+                self.labels[action] = pretty_combo(combo)
+        self.label = self.labels.get("show", "")
+        self.polling = True
+        threading.Thread(target=self._poll_loop, daemon=True).start()
+
+    def _poll_loop(self):
+        state = {a: False for a in self._poll_targets}
+        while not self._poll_stop:
+            try:
+                flags = _Q.CGEventSourceFlagsState(
+                    _Q.kCGEventSourceStateCombinedSessionState)
+                for action, (_combo, (mods, code)) in self._poll_targets.items():
+                    down = bool(flags & _q_flags(mods)) and bool(
+                        _Q.CGEventSourceKeyState(
+                            _Q.kCGEventSourceStateCombinedSessionState, code))
+                    if down and not state.get(action):
+                        self._fire(action)
+                    state[action] = down
+            except Exception:
+                pass
+            time.sleep(0.06)
+
+    def _fire(self, action: str):
+        """触发一次，并做 0.35 秒去重（Carbon 与轮询可能同时报一次）。"""
+        now = time.time()
+        if now - self._last_fire.get(action, 0.0) < 0.35:
+            return
+        self._last_fire[action] = now
+        ev = self.events.get(action)
+        if ev is not None:
+            ev.set()
 
     def _register(self, action: str, combo: str) -> bool:
         parsed = parse_combo(combo)
@@ -193,15 +284,16 @@ class HotkeyListener:
                 ctypes.c_uint32(ctypes.sizeof(hk)),
                 ctypes.byref(actual_size),
                 ctypes.byref(hk))
-            ev = self.events.get(self._ids.get(int(hk.id), ""))
-            if ev is not None:
-                ev.set()
+            action = self._ids.get(int(hk.id), "")
+            if action:
+                self._fire(action)
         except Exception:
             pass
         return 0
 
     # ---------------------------------------------------------------- 收尾
     def stop(self):
+        self._poll_stop = True
         if not self._carbon:
             return
         try:

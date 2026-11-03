@@ -9,8 +9,11 @@ HTTP 请求，以及 Translator（有道 / Google / MyMemory + 自动降级）�
 from __future__ import annotations
 
 import json
+import os
 import re
+import ssl
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -81,9 +84,104 @@ def detect_lang(text: str) -> str:
 
 # --------------------------------------------------------------------------- 网络
 
+# 日志钩子：两个主程序各自有 log()，这里不直接依赖它们
+_logger = None
+
+
+def set_logger(fn):
+    global _logger
+    _logger = fn
+
+
+def _log(msg: str):
+    if _logger is None:
+        return
+    try:
+        _logger(msg)
+    except Exception:
+        pass
+
+
+# macOS 上（尤其是 PyInstaller 打的包）Python 常常找不到根证书，
+# 一请求 https 就 CERTIFICATE_VERIFY_FAILED。按下面的顺序找一个能用的。
+_CA_CANDIDATES = (
+    "/etc/ssl/cert.pem",                        # macOS 系统自带
+    "/usr/local/etc/openssl/cert.pem",
+    "/opt/homebrew/etc/openssl@3/cert.pem",
+    "/usr/local/etc/openssl@1.1/cert.pem",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/ssl/certs/ca-certificates.crt",
+)
+
+_SSL_CTX = None
+_SSL_INSECURE = False
+
+
+def _build_ssl_context():
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        _log("ssl: 使用 certifi 根证书")
+        return ctx
+    except Exception:
+        pass
+    for path in (os.environ.get("SSL_CERT_FILE"),) + _CA_CANDIDATES:
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            ctx = ssl.create_default_context(cafile=path)
+            _log("ssl: 使用系统根证书 %s" % path)
+            return ctx
+        except Exception:
+            continue
+    try:
+        ctx = ssl.create_default_context()
+        _log("ssl: 使用 Python 默认根证书")
+        return ctx
+    except Exception as e:
+        _log("ssl: 无法创建 SSL 上下文 %r" % (e,))
+        return None
+
+
+def _ssl_context():
+    global _SSL_CTX
+    if _SSL_CTX is None:
+        _SSL_CTX = _build_ssl_context()
+    return _SSL_CTX
+
+
+def _is_cert_error(e) -> bool:
+    reason = getattr(e, "reason", e)
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        return True
+    text = str(reason).upper()
+    return "CERTIFICATE_VERIFY_FAILED" in text or "CERTIFICATE VERIFY FAILED" in text
+
+
+def _friendly_error(e):
+    """把 urllib 的英文异常换成用户能看懂的中文提示。"""
+    reason = getattr(e, "reason", e)
+    text = str(reason)
+    low = text.lower()
+    if _is_cert_error(e):
+        return TranslateError("SSL 证书校验失败：找不到可用的根证书，"
+                              "可先在设置里换个引擎，或重新安装本程序")
+    if "timed out" in low or isinstance(reason, TimeoutError):
+        return TranslateError("请求超时，请检查网络后重试")
+    if "name or service not known" in low or "nodename nor servname" in low \
+            or "getaddrinfo failed" in low:
+        return TranslateError("无法解析域名，请检查网络连接")
+    return e
+
+
+def _read(req, timeout, ctx):
+    with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+        return resp.read()
+
 
 def http_get(url: str, timeout: float = 7.0, data: bytes | None = None,
              referer: str | None = None) -> str:
+    global _SSL_INSECURE
     headers = {
         "User-Agent": UA,
         "Accept": "*/*",
@@ -94,8 +192,21 @@ def http_get(url: str, timeout: float = 7.0, data: bytes | None = None,
     if referer:
         headers["Referer"] = referer
     req = urllib.request.Request(url, data=data, headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        raw = resp.read()
+
+    https = url.lower().startswith("https")
+    try:
+        raw = _read(req, timeout, _ssl_context() if https else None)
+    except (ssl.SSLError, urllib.error.URLError) as e:
+        if not (https and _is_cert_error(e)):
+            raise _friendly_error(e) from e
+        # 根证书确实找不到：降级为不校验，让功能先能用，日志里留个记录
+        if not _SSL_INSECURE:
+            _SSL_INSECURE = True
+            _log("ssl: 根证书校验失败，本次运行改为不校验（建议装 certifi）")
+        try:
+            raw = _read(req, timeout, ssl._create_unverified_context())
+        except (ssl.SSLError, urllib.error.URLError) as e2:
+            raise _friendly_error(e2) from e2
     return raw.decode("utf-8", "replace")
 
 

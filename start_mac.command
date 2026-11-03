@@ -25,4 +25,9 @@ if ! "$PY" -c "import Vision" >/dev/null 2>&1; then
     "$PY" -m pip install --user --quiet pyobjc-framework-Vision pyobjc-framework-Quartz
 fi
 
+# 根证书：缺了会让所有翻译都报 SSL CERTIFICATE_VERIFY_FAILED
+if ! "$PY" -c "import certifi" >/dev/null 2>&1; then
+    "$PY" -m pip install --user --quiet certifi >/dev/null 2>&1 || true
+fi
+
 exec "$PY" float_trans_mac.py

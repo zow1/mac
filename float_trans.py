@@ -45,7 +45,7 @@ except Exception:                      # 取词功能不可用时，翻译本身
 
 APP_NAME = "FloatTrans"
 APP_TITLE = "悬浮翻译"
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 
 CFG_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), APP_NAME)
 CFG_PATH = os.path.join(CFG_DIR, "config.json")
@@ -148,9 +148,12 @@ def resource_path(name: str) -> str:
 # --------------------------------------------------------------------------- 翻译核心
 
 # 语言表 / 引擎 / 网络 / Translator 都在 trans_core.py 里，Windows 与 macOS 版共用
+import trans_core
 from trans_core import (LANGS, LANG_NAME, LANG_SHORT, DST_LANGS,
                         ENGINES, ENGINE_NAME, TranslateError, Result,
                         Translator, detect_lang, lang_code, http_get)
+
+trans_core.set_logger(log)
 
 POS_RE = re.compile(r"^([a-z]+\.(?:\s*[&/,]\s*[a-z]+\.)*)\s+(.+)$")
 

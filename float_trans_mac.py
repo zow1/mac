@@ -51,7 +51,7 @@ except Exception:
 
 APP_NAME = "FloatTrans"
 APP_TITLE = "悬浮翻译"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 CFG_DIR = os.path.join(os.path.expanduser("~"),
                        "Library", "Application Support", APP_NAME)
@@ -115,6 +115,9 @@ def log(msg: str):
             f.write("%s  %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg))
     except Exception:
         pass
+
+
+core.set_logger(log)
 
 
 def load_cfg() -> dict:
@@ -369,10 +372,12 @@ class PlaceholderEntry(tk.Entry):
 
 
 class RegionSelector:
-    """整屏蒙一层压暗的截图，拖动框选要识别的区域。
+    """整屏蒙一层截图，拖动框选要识别的区域。
 
-    macOS 上不用 alpha 透明（那样提示文字也会变淡），而是先截一张全屏图
-    当背景，再在选区四周铺四块 stipple 灰点矩形压暗——选区保持原色清晰。
+    两个坑都在这儿踩过：
+      1. 必须**先截屏再建窗口**。反过来的话截到的是自己的黑窗口，整屏全黑。
+      2. macOS 的 Tk 对 stipple 支持不好，用灰点矩形压暗会变成纯黑。
+         所以这里不做压暗，只描一圈边框 + 亮色选区来提示「在框选中」。
     松手回调 on_done(x, y, w, h)，坐标是屏幕点坐标。
     """
 
@@ -386,6 +391,9 @@ class RegionSelector:
         sw, sh = so.screen_size()
         self.vw, self.vh = sw, sh
 
+        # 先截屏，再建窗口
+        self._shot = self._grab(sw, sh)
+
         win = tk.Toplevel(root)
         self.win = win
         win.overrideredirect(True)
@@ -398,30 +406,19 @@ class RegionSelector:
         cv.pack(fill="both", expand=True)
         self.cv = cv
 
-        # 背景：先截整屏，再铺上来，压暗靠四周的灰点矩形
-        try:
-            path, _iw, _ih = so.capture(0, 0, sw, sh)
-            self.photo = tk.PhotoImage(file=path)
+        self.photo = self._load_photo()
+        if self.photo is not None:
             cv.create_image(0, 0, image=self.photo, anchor="nw")
+        else:
+            # 图实在加载不了（老 Tk 不认 PNG/GIF 时）：退成半透明黑层，
+            # 至少还能看见底下的字，不至于整屏全黑没法框
             try:
-                os.remove(path)
+                win.attributes("-alpha", 0.35)
             except Exception:
                 pass
-        except Exception as e:
-            log("overlay background fail %r" % (e,))
-            cv.configure(bg="#0b0d13")
 
-        stipple = "gray25"
-        self.dark = [
-            cv.create_rectangle(0, 0, sw, sh, fill="#000000", outline="",
-                                stipple=stipple),
-            cv.create_rectangle(0, 0, 0, 0, fill="#000000", outline="",
-                                stipple=stipple),
-            cv.create_rectangle(0, 0, 0, 0, fill="#000000", outline="",
-                                stipple=stipple),
-            cv.create_rectangle(0, 0, 0, 0, fill="#000000", outline="",
-                                stipple=stipple),
-        ]
+        # 四边描一圈，提示已经进入框选状态
+        cv.create_rectangle(1, 1, sw - 2, sh - 2, outline=ACCENT, width=2)
         self.sel = cv.create_rectangle(0, 0, 0, 0, outline=ACCENT, width=2,
                                        state="hidden")
 
@@ -445,6 +442,33 @@ class RegionSelector:
         except Exception:
             pass
 
+    # ---------------------------------------------------------------- 背景图
+    def _grab(self, sw, sh):
+        try:
+            path, iw, ih = so.capture(0, 0, sw, sh)
+            return path, iw, ih
+        except Exception as e:
+            log("overlay grab fail %r" % (e,))
+            return None
+
+    def _load_photo(self):
+        """把截图变成 Tk 能显示的图。Tk 8.5 不认 PNG，所以再退一步用 GIF。"""
+        if not self._shot:
+            return None
+        path, iw, ih = self._shot
+        for fmt in ("png", "gif"):
+            try:
+                if fmt == "gif":
+                    path, iw, ih = so.capture(0, 0, self.vw, self.vh, fmt="gif")
+                img = tk.PhotoImage(file=path)
+                # Retina 上截图是点数的 2 倍，缩一半才和屏幕坐标对齐
+                if self.vw and iw >= self.vw * 2 - 2:
+                    img = img.subsample(2)
+                return img
+            except Exception as e:
+                log("overlay image(%s) fail %r" % (fmt, e))
+        return None
+
     # ---------------------------------------------------------------- 事件
     def _press(self, e):
         self.x0, self.y0 = e.x, e.y
@@ -462,11 +486,6 @@ class RegionSelector:
         if w < 2 or h < 2:
             return
 
-        # 四块压暗矩形围出中间的亮区
-        self.cv.coords(self.dark[0], 0, 0, self.vw, t)
-        self.cv.coords(self.dark[1], 0, b, self.vw, self.vh)
-        self.cv.coords(self.dark[2], 0, t, l, b)
-        self.cv.coords(self.dark[3], r, t, self.vw, b)
         self.cv.coords(self.sel, l, t, r, b)
         self.cv.itemconfigure(self.sel, state="normal")
 

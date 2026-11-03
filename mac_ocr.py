@@ -157,12 +157,17 @@ def image_size(path: str):
         return 0, 0
 
 
-def capture(x, y, w, h, path: str | None = None):
-    """截一块屏幕（点坐标），返回 (路径, 图宽像素, 图高像素)。"""
-    path = path or os.path.join(tempfile.gettempdir(), "floattrans_shot.png")
+def capture(x, y, w, h, path: str | None = None, fmt: str = "png"):
+    """截一块屏幕（点坐标），返回 (路径, 图宽像素, 图高像素)。
+
+    fmt 默认 png；Tk 8.5 显示不了 png 时可以传 gif 当背景图。
+    """
+    ext = "gif" if fmt == "gif" else "png"
+    path = path or os.path.join(tempfile.gettempdir(),
+                                "floattrans_shot." + ext)
     x, y = int(x), int(y)
     w, h = max(1, int(w)), max(1, int(h))
-    cmd = [SCREENCAPTURE, "-x", "-t", "png",
+    cmd = [SCREENCAPTURE, "-x", "-t", fmt,
            "-R", "%d,%d,%d,%d" % (x, y, w, h), path]
     subprocess.run(cmd, check=True, capture_output=True, timeout=8)
     iw, ih = image_size(path)

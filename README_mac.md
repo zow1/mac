@@ -5,7 +5,7 @@ Windows 版的 macOS 移植。界面、操作、翻译引擎都和 Windows 版�
 | 功能 | Windows 版 | macOS 版 |
 | --- | --- | --- |
 | 截屏取词 | GDI BitBlt + Windows.Media.Ocr | `screencapture` + Vision 框架（本地离线） |
-| 全局热键 | `RegisterHotKey` | Carbon `RegisterEventHotKey`（**不需要**辅助功能授权） |
+| 全局热键 | `RegisterHotKey` | Carbon `RegisterEventHotKey` + 按键状态轮询兜底（**不需要**辅助功能授权） |
 | 发音 | MCI 播放 mp3 | `afplay`，失败退回 `say` |
 | 开机自启 | 注册表 Run 键 | `~/Library/LaunchAgents` plist |
 | 圆角 | `SetWindowRgn` | 不做圆角（macOS 无对应的公开 API） |
@@ -112,47 +112,15 @@ python3 float_trans_mac.py --check
 | --- | --- |
 | 双击脚本只闪一下 | 没有执行权限 → `chmod +x start_mac.command`；或没有 python3 → 装 python.org 版本 |
 | 窗口一片空白 / 字体发虚 | 用了系统自带 python3 的 Tk 8.5 → 换 python.org 的 Python 3.12 |
+| 翻译报 `SSL: CERTIFICATE_VERIFY_FAILED` | 找不到根证书。v1.1.0 起会自动找 certifi / `/etc/ssl/cert.pem`，都找不到就降级为不校验（日志里会记一行）。源码运行可手动补：`python3 -m pip install --user certifi` |
 | 点「截图」没反应或识别为空 | 屏幕录制权限没给，或给了但没重启终端 |
+| 截图时整屏全黑 | v1.1.0 已修：改为**先截屏再建窗口**（原来截到的是自己的黑窗口），并且不再依赖 macOS 不支持的 stipple 压暗 |
+| 热键按了没反应 | v1.1.0 已修：Carbon 注册成功但 Tk 事件循环不派发，改成轮询按键状态（`CGEventSourceKeyState`，同样不需要辅助功能授权）。设置里能看到实际生效的组合 |
 | 呼出热键「未注册」 | ⌃⌥T 被别的 App 占了，程序会自动试备用键；设置里能看到实际注册成什么 |
 | 悬停取词不触发 | 要先点「悬停」按钮打开开关，然后**按住 Option** 且鼠标**停住不动**约半秒 |
 | 窗口在全屏视频上不显示 | 换成播放器的「窗口化全屏 / 无边框窗口」 |
 | 提示「取词模块缺失」 | `python3 -m pip install pyobjc-framework-Vision pyobjc-framework-Quartz` |
 | 4G 内存有点卡 | 正常。Vision 首次识别要加载模型，约 1～2 秒，之后就快了；把「查词自动发音」关掉能省一点 |
-| 双击 app 提示「Apple 无法检查是否包含恶意软件」 | 没公证的正常现象，见下面一节 |
-
-### 从 dmg 装好后打不开（Gatekeeper）
-
-提示原文类似：
-
-> 无法打开「FloatTrans」，因为 Apple 无法检查其是否包含恶意软件。
-> 此软件需要更新。请联系开发者了解更多信息。
-
-这是 **ad-hoc 签名 + 无公证** 的必然结果（公证要 99 美元/年的 Apple Developer 账号），不是程序损坏。处理两步：
-
-1. 先把 `FloatTrans` 从挂载的 dmg 里**拖进「应用程序」**，别直接在 dmg 里双击运行。
-2. 打开「终端」执行：
-
-```bash
-xattr -dr com.apple.quarantine /Applications/FloatTrans.app
-```
-
-然后再双击就能开。以后不会再拦。
-
-如果提示「**已损坏，无法打开，你应该将它移到废纸篓**」，再补一次签名：
-
-```bash
-sudo xattr -rd com.apple.quarantine /Applications/FloatTrans.app
-codesign --force --deep --sign - /Applications/FloatTrans.app
-```
-
-也可以走图形界面：先双击让它被拦一次，然后 **系统偏好设置 → 安全性与隐私 → 通用**，底部会出现「已阻止使用 FloatTrans…」，点 **仍要打开**。
-
-想确认包本身是好的（应显示 `Signature=adhoc` 和 `x86_64`）：
-
-```bash
-codesign -dv --verbose=2 /Applications/FloatTrans.app 2>&1
-file /Applications/FloatTrans.app/Contents/MacOS/FloatTrans
-```
 
 ---
 
@@ -189,11 +157,11 @@ dist/FloatTrans-1.0.0.dmg      ← 分发用
 
 ### 装好后还要做两件事
 
-1. **首次打开**：先拖进「应用程序」，再执行
+1. **首次打开**：右键 → 打开（未签名，Gatekeeper 会拦一次）。
+   如果提示「已损坏，无法打开」，在终端里执行：
    ```bash
    xattr -dr com.apple.quarantine /Applications/FloatTrans.app
    ```
-   没公证的包会被 Gatekeeper 拦一次，去掉隔离属性即可（详见「常见问题」里的 Gatekeeper 一节）。
 2. **给屏幕录制权限**：系统设置 → 隐私与安全性 → 屏幕录制 → 勾选 **FloatTrans**（不是 Terminal，打包后权限按 app 单独记）。
 
 > 注意：`.app` 里的「开机自动启动」开关会写 LaunchAgent 指向 app 内的 python，不如直接用系统设置 → 通用 → 登录项 里添加 FloatTrans.app 稳。
@@ -245,7 +213,7 @@ bad interpreter: /bin/bash^M: no such file or directory
 
 ### 下载后注意
 
-- 产物是 **ad-hoc 签名**（没有开发者证书、没公证），首次打开会被 Gatekeeper 拦一次：先拖进「应用程序」，再 `xattr -dr com.apple.quarantine /Applications/FloatTrans.app`
+- 产物是 **ad-hoc 签名**（没有开发者证书），首次打开仍要右键 → 打开；提示「已损坏」就 `xattr -dr com.apple.quarantine /Applications/FloatTrans.app`
 - 打包后的权限是按 app 单独记的，要在「屏幕录制」里勾 **FloatTrans**
 - Artifact 默认保留 30 天，想要长期下载就建个 Release 把 dmg 传上去
 

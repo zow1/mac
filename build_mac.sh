@@ -7,12 +7,15 @@ set -e
 cd "$(dirname "$0")"
 
 PY=${PY:-python3}
-VERSION="1.0.0"
+VERSION="1.1.0"
 MODE=${1:-dmg}
 
 echo "[1/4] 安装依赖…"
 "$PY" -m pip install --upgrade --quiet pyinstaller
 "$PY" -m pip install --quiet pyobjc-framework-Vision pyobjc-framework-Quartz
+# certifi 一定要装：PyInstaller 打出来的包里 Python 找不到系统根证书，
+# 不带上它所有 https 请求都会 CERTIFICATE_VERIFY_FAILED
+"$PY" -m pip install --quiet certifi
 
 echo "[2/4] 生成 .icns 图标…"
 # 有 Pillow 就重新画一张 1024 的，没有就用仓库里现成的 icon_mac.png
@@ -44,22 +47,15 @@ iconutil -c icns build_icon.iconset -o app.icns
 echo "[3/4] 打包 .app…"
 "$PY" -m PyInstaller --noconfirm --clean --windowed --name FloatTrans \
     --icon app.icns \
-    --osx-bundle-identifier com.zow1.floattrans \
     --hidden-import Vision \
     --hidden-import Quartz \
     --hidden-import AppKit \
+    --collect-data certifi \
     float_trans_mac.py
 
 # ad-hoc 签名：能减少「已损坏，无法打开」的提示（正式分发要开发者证书）
 codesign --force --deep --sign - dist/FloatTrans.app 2>/dev/null || \
     echo "   （ad-hoc 签名跳过，不影响本机使用）"
-
-# 本机打出来的包不该带隔离属性，否则双击也会被 Gatekeeper 拦
-xattr -cr dist/FloatTrans.app 2>/dev/null || true
-
-echo "      签名校验："
-codesign --verify --deep --strict --verbose=2 dist/FloatTrans.app 2>&1 | sed 's/^/        /' || true
-echo "      架构：$(file -b dist/FloatTrans.app/Contents/MacOS/FloatTrans | cut -d: -f2-)"
 
 if [ "$MODE" = "app" ]; then
     echo
@@ -83,7 +79,5 @@ echo "完成："
 echo "  dist/FloatTrans.app          —— 直接双击用"
 echo "  $DMG   —— 分发用，双击挂载后把图标拖进 Applications"
 echo
-echo "首次打开：先拖进「应用程序」，再执行"
-echo "  xattr -dr com.apple.quarantine /Applications/FloatTrans.app"
-echo "（ad-hoc 签名没公证，从网上下载会被 Gatekeeper 拦一次；去掉隔离属性即可）"
+echo "首次打开：右键 → 打开（未签名，Gatekeeper 会拦一次）。"
 echo "装好后要在 系统设置 → 隐私与安全性 → 屏幕录制 里勾选 FloatTrans。"
