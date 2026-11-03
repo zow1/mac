@@ -42,6 +42,10 @@ jobs:
           ls -lh dist/
           echo "--- 主程序架构（应是 x86_64）---"
           file dist/FloatTrans.app/Contents/MacOS/FloatTrans
+          echo "--- 签名（应是 adhoc）---"
+          codesign -dv --verbose=2 dist/FloatTrans.app 2>&1 | head -8 || true
+          echo "--- 签名校验 ---"
+          codesign --verify --deep --strict --verbose=2 dist/FloatTrans.app 2>&1 || true
 
       - name: 压成 zip（保住可执行权限和软链接）
         run: |

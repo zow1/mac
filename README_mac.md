@@ -118,6 +118,41 @@ python3 float_trans_mac.py --check
 | 窗口在全屏视频上不显示 | 换成播放器的「窗口化全屏 / 无边框窗口」 |
 | 提示「取词模块缺失」 | `python3 -m pip install pyobjc-framework-Vision pyobjc-framework-Quartz` |
 | 4G 内存有点卡 | 正常。Vision 首次识别要加载模型，约 1～2 秒，之后就快了；把「查词自动发音」关掉能省一点 |
+| 双击 app 提示「Apple 无法检查是否包含恶意软件」 | 没公证的正常现象，见下面一节 |
+
+### 从 dmg 装好后打不开（Gatekeeper）
+
+提示原文类似：
+
+> 无法打开「FloatTrans」，因为 Apple 无法检查其是否包含恶意软件。
+> 此软件需要更新。请联系开发者了解更多信息。
+
+这是 **ad-hoc 签名 + 无公证** 的必然结果（公证要 99 美元/年的 Apple Developer 账号），不是程序损坏。处理两步：
+
+1. 先把 `FloatTrans` 从挂载的 dmg 里**拖进「应用程序」**，别直接在 dmg 里双击运行。
+2. 打开「终端」执行：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/FloatTrans.app
+```
+
+然后再双击就能开。以后不会再拦。
+
+如果提示「**已损坏，无法打开，你应该将它移到废纸篓**」，再补一次签名：
+
+```bash
+sudo xattr -rd com.apple.quarantine /Applications/FloatTrans.app
+codesign --force --deep --sign - /Applications/FloatTrans.app
+```
+
+也可以走图形界面：先双击让它被拦一次，然后 **系统偏好设置 → 安全性与隐私 → 通用**，底部会出现「已阻止使用 FloatTrans…」，点 **仍要打开**。
+
+想确认包本身是好的（应显示 `Signature=adhoc` 和 `x86_64`）：
+
+```bash
+codesign -dv --verbose=2 /Applications/FloatTrans.app 2>&1
+file /Applications/FloatTrans.app/Contents/MacOS/FloatTrans
+```
 
 ---
 
@@ -154,11 +189,11 @@ dist/FloatTrans-1.0.0.dmg      ← 分发用
 
 ### 装好后还要做两件事
 
-1. **首次打开**：右键 → 打开（未签名，Gatekeeper 会拦一次）。
-   如果提示「已损坏，无法打开」，在终端里执行：
+1. **首次打开**：先拖进「应用程序」，再执行
    ```bash
    xattr -dr com.apple.quarantine /Applications/FloatTrans.app
    ```
+   没公证的包会被 Gatekeeper 拦一次，去掉隔离属性即可（详见「常见问题」里的 Gatekeeper 一节）。
 2. **给屏幕录制权限**：系统设置 → 隐私与安全性 → 屏幕录制 → 勾选 **FloatTrans**（不是 Terminal，打包后权限按 app 单独记）。
 
 > 注意：`.app` 里的「开机自动启动」开关会写 LaunchAgent 指向 app 内的 python，不如直接用系统设置 → 通用 → 登录项 里添加 FloatTrans.app 稳。
@@ -210,7 +245,7 @@ bad interpreter: /bin/bash^M: no such file or directory
 
 ### 下载后注意
 
-- 产物是 **ad-hoc 签名**（没有开发者证书），首次打开仍要右键 → 打开；提示「已损坏」就 `xattr -dr com.apple.quarantine /Applications/FloatTrans.app`
+- 产物是 **ad-hoc 签名**（没有开发者证书、没公证），首次打开会被 Gatekeeper 拦一次：先拖进「应用程序」，再 `xattr -dr com.apple.quarantine /Applications/FloatTrans.app`
 - 打包后的权限是按 app 单独记的，要在「屏幕录制」里勾 **FloatTrans**
 - Artifact 默认保留 30 天，想要长期下载就建个 Release 把 dmg 传上去
 
